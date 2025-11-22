@@ -33,17 +33,12 @@ jobs:
           cd ffmpeg-src
 
           # --- DEFINISI FLAGS ---
-          # Kita simpan flags dalam variabel dulu agar rapi
-          # PENTING: Flag ini memastikan outputnya kompatibel dengan browser
           COMMON_FLAGS="-s USE_PTHREADS=0 -O3 -msimd128"
           
-          # LDFLAGS butuh setting memory agar configure test berhasil membuat executable dummy
+          # LDFLAGS: Setting memori dan fungsi yang diexport
           LD_FLAGS="$COMMON_FLAGS -s INITIAL_MEMORY=33554432 -s ALLOW_MEMORY_GROWTH=1 -s MAXIMUM_MEMORY=4gb -s INVOKE_RUN=0 -s EXPORTED_RUNTIME_METHODS='[\"FS\",\"main\",\"cwrap\",\"setValue\",\"getValue\"]' -s MODULARIZE=1 -s EXPORT_NAME='createFFmpegCore' -s WASM_BIGINT=1"
 
           # --- JALANKAN CONFIGURE ---
-          # Kita gunakan emconfigure, TAPI kita juga paksa definisi tool lewat argumen
-          # agar script configure FFmpeg tidak mencoba menggunakan gcc sistem.
-          
           emconfigure ./configure \
             --target-os=none \
             --arch=x86_32 \
@@ -87,12 +82,11 @@ jobs:
           cd ffmpeg-src
           mkdir ../dist
           
-          # Linking manual agar glue code JS terbentuk sempurna
-          # Kita arahkan output ke folder dist
+          # --- LINKING MANUAL ---
+          # Di sini perbaikannya: Menambahkan ffmpeg_mux.o, ffmpeg_sched.o, dan opt_common.o
+          # File-file ini wajib ada untuk FFmpeg versi 6.0+
           
           emcc \
-            -Llibavcodec -Llibavdevice -Llibavfilter -Llibavformat -Llibavutil -Llibswresample -Llibswscale \
-            -lavdevice -lavfilter -lavformat -lavcodec -lavutil -lswresample -lswscale \
             -O3 \
             -s USE_PTHREADS=0 \
             -s INITIAL_MEMORY=33554432 \
@@ -103,18 +97,25 @@ jobs:
             -s EXPORT_NAME='createFFmpegCore' \
             -s WASM_BIGINT=1 \
             -o ../dist/ffmpeg-core.js \
+            \
             fftools/ffmpeg.o \
+            fftools/ffmpeg_mux.o \
+            fftools/ffmpeg_mux_init.o \
+            fftools/ffmpeg_demux.o \
+            fftools/ffmpeg_sched.o \
             fftools/ffmpeg_opt.o \
             fftools/ffmpeg_filter.o \
             fftools/ffmpeg_hw.o \
-            fftools/ffmpeg_mux_init.o \
-            fftools/ffmpeg_demux.o \
             fftools/cmdutils.o \
+            fftools/opt_common.o \
+            \
             libavformat/libavformat.a \
             libavcodec/libavcodec.a \
             libavutil/libavutil.a \
             libswresample/libswresample.a \
-            libswscale/libswscale.a
+            libswscale/libswscale.a \
+            libavfilter/libavfilter.a \
+            libavdevice/libavdevice.a
 
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4

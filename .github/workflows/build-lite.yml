@@ -32,11 +32,18 @@ jobs:
         run: |
           cd ffmpeg-src
 
-          # Setting Flags untuk Optimasi WASM
-          export CFLAGS="-s USE_PTHREADS=0 -O3 -msimd128"
-          export LDFLAGS="$CFLAGS -s INITIAL_MEMORY=33554432 -s ALLOW_MEMORY_GROWTH=1 -s MAXIMUM_MEMORY=4gb -s INVOKE_RUN=0 -s EXPORTED_RUNTIME_METHODS='[\"FS\",\"main\",\"cwrap\",\"setValue\",\"getValue\"]' -s MODULARIZE=1 -s EXPORT_NAME='createFFmpegCore' -s WASM_BIGINT=1"
+          # --- DEFINISI FLAGS ---
+          # Kita simpan flags dalam variabel dulu agar rapi
+          # PENTING: Flag ini memastikan outputnya kompatibel dengan browser
+          COMMON_FLAGS="-s USE_PTHREADS=0 -O3 -msimd128"
+          
+          # LDFLAGS butuh setting memory agar configure test berhasil membuat executable dummy
+          LD_FLAGS="$COMMON_FLAGS -s INITIAL_MEMORY=33554432 -s ALLOW_MEMORY_GROWTH=1 -s MAXIMUM_MEMORY=4gb -s INVOKE_RUN=0 -s EXPORTED_RUNTIME_METHODS='[\"FS\",\"main\",\"cwrap\",\"setValue\",\"getValue\"]' -s MODULARIZE=1 -s EXPORT_NAME='createFFmpegCore' -s WASM_BIGINT=1"
 
-          # Konfigurasi: Matikan semua, nyalakan hanya Demuxer/Muxer MP4, WebM & Filter AAC
+          # --- JALANKAN CONFIGURE ---
+          # Kita gunakan emconfigure, TAPI kita juga paksa definisi tool lewat argumen
+          # agar script configure FFmpeg tidak mencoba menggunakan gcc sistem.
+          
           emconfigure ./configure \
             --target-os=none \
             --arch=x86_32 \
@@ -54,13 +61,21 @@ jobs:
             --disable-everything \
             \
             --enable-protocol=file \
-            \
             --enable-demuxer=mov,mp4,m4a,matroska,webm,aac \
             --enable-muxer=mp4,mov,webm,matroska,adts \
-            \
             --enable-parser=h264,vp8,vp9,aac,opus \
+            --enable-bsf=aac_adtstoasc,h264_mp4toannexb,hevc_mp4toannexb \
             \
-            --enable-bsf=aac_adtstoasc,h264_mp4toannexb,hevc_mp4toannexb
+            --nm="emnm" \
+            --ar="emar" \
+            --ranlib="emranlib" \
+            --cc="emcc" \
+            --cxx="em++" \
+            --objcc="emcc" \
+            --dep-cc="emcc" \
+            \
+            --extra-cflags="$COMMON_FLAGS" \
+            --extra-ldflags="$LD_FLAGS"
 
       - name: Compile Object Files
         run: |
@@ -72,8 +87,8 @@ jobs:
           cd ffmpeg-src
           mkdir ../dist
           
-          # Kita link manual semua object file ffmpeg menjadi satu library JS+WASM
-          # Ini memastikan 'glue code' JS terbentuk dengan benar
+          # Linking manual agar glue code JS terbentuk sempurna
+          # Kita arahkan output ke folder dist
           
           emcc \
             -Llibavcodec -Llibavdevice -Llibavfilter -Llibavformat -Llibavutil -Llibswresample -Llibswscale \

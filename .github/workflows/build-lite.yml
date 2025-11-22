@@ -1,12 +1,87 @@
-- name: Final Link (Generate JS and WASM)
+name: Build FFmpeg WASM Lite (Cut Only)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout Repo
+        uses: actions/checkout@v4
+
+      - name: Setup Emscripten
+        uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: 3.1.45
+          actions-cache-folder: 'emsdk-cache'
+
+      - name: Install Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y automake autoconf libtool pkg-config yasm build-essential
+
+      - name: Download FFmpeg Source
+        run: |
+          wget https://ffmpeg.org/releases/ffmpeg-6.0.tar.bz2
+          tar xjf ffmpeg-6.0.tar.bz2
+          mv ffmpeg-6.0 ffmpeg-src
+
+      - name: Configure FFmpeg (Lite Version)
+        run: |
+          cd ffmpeg-src
+
+          # Flags
+          COMMON_FLAGS="-s USE_PTHREADS=0 -O3 -msimd128"
+          LD_FLAGS="$COMMON_FLAGS -s INITIAL_MEMORY=33554432 -s ALLOW_MEMORY_GROWTH=1 -s MAXIMUM_MEMORY=4gb -s INVOKE_RUN=0 -s EXPORTED_RUNTIME_METHODS='[\"FS\",\"main\",\"cwrap\",\"setValue\",\"getValue\"]' -s MODULARIZE=1 -s EXPORT_NAME='createFFmpegCore' -s WASM_BIGINT=1"
+
+          # Configure
+          emconfigure ./configure \
+            --target-os=none \
+            --arch=x86_32 \
+            --enable-cross-compile \
+            --disable-x86asm \
+            --disable-inline-asm \
+            --disable-stripping \
+            --disable-doc \
+            --disable-debug \
+            --disable-runtime-cpudetect \
+            --disable-autodetect \
+            \
+            --disable-ffplay \
+            --disable-ffprobe \
+            --disable-everything \
+            \
+            --enable-protocol=file \
+            --enable-demuxer=mov,mp4,m4a,matroska,webm,aac \
+            --enable-muxer=mp4,mov,webm,matroska,adts \
+            --enable-parser=h264,vp8,vp9,aac,opus \
+            --enable-bsf=aac_adtstoasc,h264_mp4toannexb,hevc_mp4toannexb \
+            \
+            --nm="emnm" \
+            --ar="emar" \
+            --ranlib="emranlib" \
+            --cc="emcc" \
+            --cxx="em++" \
+            --objcc="emcc" \
+            --dep-cc="emcc" \
+            \
+            --extra-cflags="$COMMON_FLAGS" \
+            --extra-ldflags="$LD_FLAGS"
+
+      - name: Compile Object Files
+        run: |
+          cd ffmpeg-src
+          emmake make -j$(nproc)
+
+      - name: Final Link (Generate JS and WASM)
         run: |
           cd ffmpeg-src
           mkdir ../dist
           
-          # --- LINKING OTOMATIS (WILDCARD) ---
-          # Menggunakan fftools/*.o agar otomatis mengambil semua file object yang ada
-          # (ffmpeg.o, cmdutils.o, dll) tanpa perlu menebak nama file manual.
-          # Urutan library (-l...) juga dirapikan agar dependensi (avutil) ada di paling akhir.
+          # Wildcard fftools/*.o akan mengambil semua object file yang ada (ffmpeg.o, cmdutils.o, dll)
+          # tanpa peduli strukturnya berubah.
           
           emcc \
             -O3 \
@@ -24,3 +99,9 @@
             \
             -Llibavcodec -Llibavdevice -Llibavfilter -Llibavformat -Llibavutil -Llibswresample -Llibswscale \
             -lavdevice -lavfilter -lavformat -lavcodec -lswresample -lswscale -lavutil
+
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ffmpeg-core-lite
+          path: dist/

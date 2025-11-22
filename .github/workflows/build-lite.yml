@@ -1,7 +1,7 @@
 name: Build FFmpeg WASM Lite (Cut Only)
 
 on:
-  workflow_dispatch: # Agar bisa dijalankan manual via tombol
+  workflow_dispatch:
 
 jobs:
   build:
@@ -11,34 +11,32 @@ jobs:
       - name: Checkout Repo
         uses: actions/checkout@v4
 
-      - name: Setup Emscripten (WASM Compiler)
+      - name: Setup Emscripten
         uses: mymindstorm/setup-emsdk@v14
         with:
-          version: 3.1.45 # Versi stabil yang sering dipakai ffmpeg.wasm
+          version: 3.1.45
           actions-cache-folder: 'emsdk-cache'
 
       - name: Install Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y automake autoconf libtool pkg-config yasm
+          sudo apt-get install -y automake autoconf libtool pkg-config yasm build-essential
 
       - name: Download FFmpeg Source
         run: |
-          # Mengambil FFmpeg versi 6.0 (Versi yang stabil untuk WASM saat ini)
           wget https://ffmpeg.org/releases/ffmpeg-6.0.tar.bz2
           tar xjf ffmpeg-6.0.tar.bz2
           mv ffmpeg-6.0 ffmpeg-src
 
-      - name: Configure and Build (The Lite Version)
+      - name: Configure FFmpeg (Lite Version)
         run: |
           cd ffmpeg-src
 
-          # --- FLAGS KOMPILASI EMCC (WASM) ---
-          # Kita set ini agar outputnya kompatibel dengan library @ffmpeg/ffmpeg
+          # Setting Flags untuk Optimasi WASM
           export CFLAGS="-s USE_PTHREADS=0 -O3 -msimd128"
           export LDFLAGS="$CFLAGS -s INITIAL_MEMORY=33554432 -s ALLOW_MEMORY_GROWTH=1 -s MAXIMUM_MEMORY=4gb -s INVOKE_RUN=0 -s EXPORTED_RUNTIME_METHODS='[\"FS\",\"main\",\"cwrap\",\"setValue\",\"getValue\"]' -s MODULARIZE=1 -s EXPORT_NAME='createFFmpegCore' -s WASM_BIGINT=1"
 
-          # --- KONFIGURASI FFMPEG ---
+          # Konfigurasi: Matikan semua, nyalakan hanya Demuxer/Muxer MP4, WebM & Filter AAC
           emconfigure ./configure \
             --target-os=none \
             --arch=x86_32 \
@@ -50,7 +48,9 @@ jobs:
             --disable-debug \
             --disable-runtime-cpudetect \
             --disable-autodetect \
-            --disable-programs \
+            \
+            --disable-ffplay \
+            --disable-ffprobe \
             --disable-everything \
             \
             --enable-protocol=file \
@@ -60,36 +60,24 @@ jobs:
             \
             --enable-parser=h264,vp8,vp9,aac,opus \
             \
-            --enable-bsf=aac_adtstoasc,h264_mp4toannexb,hevc_mp4toannexb \
-            \
-            --nm="llvm-nm" \
-            --ar="emar" \
-            --ranlib="emranlib" \
-            --cc="emcc" \
-            --cxx="em++" \
-            --objcc="emcc" \
-            --dep-cc="emcc"
+            --enable-bsf=aac_adtstoasc,h264_mp4toannexb,hevc_mp4toannexb
 
-          # --- COMPILE ---
-          # -j$(nproc) menggunakan semua core CPU yang tersedia di GitHub Runner
+      - name: Compile Object Files
+        run: |
+          cd ffmpeg-src
           emmake make -j$(nproc)
 
-          # --- PINDAHKAN HASIL ---
-          mkdir ../dist
-          # Kita rename ffmpeg menjadi ffmpeg-core.wasm dan .js sesuai standar library
-          mv ffmpeg ../dist/ffmpeg-core.wasm
-          # Note: Konfigurasi di atas menghasilkan binary raw,
-          # untuk membuat JS glue code yang benar-benar kompatibel,
-          # kita perlu langkah linking akhir manual dengan emcc.
-          
       - name: Final Link (Generate JS and WASM)
         run: |
-          # Langkah ini menyatukan hasil compile FFmpeg menjadi modul JS + WASM final
           cd ffmpeg-src
+          mkdir ../dist
+          
+          # Kita link manual semua object file ffmpeg menjadi satu library JS+WASM
+          # Ini memastikan 'glue code' JS terbentuk dengan benar
           
           emcc \
             -Llibavcodec -Llibavdevice -Llibavfilter -Llibavformat -Llibavutil -Llibswresample -Llibswscale \
-            -lavformat -lavcodec -lavutil -lswresample \
+            -lavdevice -lavfilter -lavformat -lavcodec -lavutil -lswresample -lswscale \
             -O3 \
             -s USE_PTHREADS=0 \
             -s INITIAL_MEMORY=33554432 \
@@ -100,7 +88,18 @@ jobs:
             -s EXPORT_NAME='createFFmpegCore' \
             -s WASM_BIGINT=1 \
             -o ../dist/ffmpeg-core.js \
-            libavformat/libavformat.a libavcodec/libavcodec.a libavutil/libavutil.a libswresample/libswresample.a
+            fftools/ffmpeg.o \
+            fftools/ffmpeg_opt.o \
+            fftools/ffmpeg_filter.o \
+            fftools/ffmpeg_hw.o \
+            fftools/ffmpeg_mux_init.o \
+            fftools/ffmpeg_demux.o \
+            fftools/cmdutils.o \
+            libavformat/libavformat.a \
+            libavcodec/libavcodec.a \
+            libavutil/libavutil.a \
+            libswresample/libswresample.a \
+            libswscale/libswscale.a
 
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4

@@ -32,8 +32,8 @@ jobs:
         run: |
           cd ffmpeg-src
 
-          # Flags
-          COMMON_FLAGS="-s USE_PTHREADS=0 -O3 -msimd128"
+          # Flags (PERBAIKAN: -msimd128 dihapus untuk kompatibilitas maksimal)
+          COMMON_FLAGS="-s USE_PTHREADS=0 -O3"
           LD_FLAGS="$COMMON_FLAGS -s INITIAL_MEMORY=33554432 -s ALLOW_MEMORY_GROWTH=1 -s MAXIMUM_MEMORY=4gb -s INVOKE_RUN=0 -s EXPORTED_RUNTIME_METHODS='[\"FS\",\"main\",\"cwrap\",\"setValue\",\"getValue\"]' -s MODULARIZE=1 -s EXPORT_NAME='createFFmpegCore' -s WASM_BIGINT=1"
 
           # Configure
@@ -80,9 +80,7 @@ jobs:
           cd ffmpeg-src
           mkdir ../dist
           
-          # Wildcard fftools/*.o akan mengambil semua object file yang ada (ffmpeg.o, cmdutils.o, dll)
-          # tanpa peduli strukturnya berubah.
-          
+          # Pastikan flag di sini juga konsisten (tanpa SIMD)
           emcc \
             -O3 \
             -s USE_PTHREADS=0 \

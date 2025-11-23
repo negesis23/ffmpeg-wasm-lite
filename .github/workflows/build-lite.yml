@@ -1,4 +1,4 @@
-name: Build FFmpeg WASM Lite (Cut Only)
+name: Build FFmpeg WASM Ultra Lite (Cut & Mux Only)
 
 on:
   workflow_dispatch:
@@ -28,15 +28,20 @@ jobs:
           tar xjf ffmpeg-6.0.tar.bz2
           mv ffmpeg-6.0 ffmpeg-src
 
-      - name: Configure FFmpeg (Lite Version)
+      - name: Configure FFmpeg (Ultra Lite)
         run: |
           cd ffmpeg-src
 
-          # Flags (PERBAIKAN: -msimd128 dihapus untuk kompatibilitas maksimal)
-          COMMON_FLAGS="-s USE_PTHREADS=0 -O3"
-          LD_FLAGS="$COMMON_FLAGS -s INITIAL_MEMORY=33554432 -s ALLOW_MEMORY_GROWTH=1 -s MAXIMUM_MEMORY=4gb -s INVOKE_RUN=0 -s EXPORTED_RUNTIME_METHODS='[\"FS\",\"main\",\"cwrap\",\"setValue\",\"getValue\"]' -s MODULARIZE=1 -s EXPORT_NAME='createFFmpegCore' -s WASM_BIGINT=1"
+          # FLAGS OPTIMASI UKURAN
+          # -Oz: Optimasi agresif untuk ukuran file (Space optimization)
+          # -flto: Link Time Optimization (membuang kode mati lebih baik)
+          # --closure 1: Minifikasi file JavaScript
+          
+          COMMON_FLAGS="-s USE_PTHREADS=0 -Oz -flto"
+          
+          LD_FLAGS="$COMMON_FLAGS -s INITIAL_MEMORY=33554432 -s ALLOW_MEMORY_GROWTH=1 -s MAXIMUM_MEMORY=4gb -s INVOKE_RUN=0 -s EXPORTED_RUNTIME_METHODS='[\"FS\",\"main\",\"cwrap\",\"setValue\",\"getValue\"]' -s MODULARIZE=1 -s EXPORT_NAME='createFFmpegCore' -s WASM_BIGINT=1 --closure 1"
 
-          # Configure
+          # KONFIGURASI FFmpeg
           emconfigure ./configure \
             --target-os=none \
             --arch=x86_32 \
@@ -48,15 +53,26 @@ jobs:
             --disable-debug \
             --disable-runtime-cpudetect \
             --disable-autodetect \
+            --disable-pthreads \
             \
-            --disable-ffplay \
-            --disable-ffprobe \
             --disable-everything \
+            --disable-avdevice \
+            --disable-avfilter \
+            --disable-swscale \
+            --disable-swresample \
+            --disable-postproc \
+            --disable-network \
+            --disable-d3d11va \
+            --disable-dxva2 \
+            --disable-vaapi \
+            --disable-vdpau \
             \
             --enable-protocol=file \
-            --enable-demuxer=mov,mp4,m4a,matroska,webm,aac \
-            --enable-muxer=mp4,mov,webm,matroska,adts \
-            --enable-parser=h264,vp8,vp9,aac,opus \
+            \
+            --enable-demuxer=mov,mp4,m4a,aac,mp3,matroska,webm \
+            --enable-muxer=mp4,mov,matroska,webm \
+            \
+            --enable-parser=h264,aac,vp8,vp9,opus \
             --enable-bsf=aac_adtstoasc,h264_mp4toannexb,hevc_mp4toannexb \
             \
             --nm="emnm" \
@@ -80,9 +96,12 @@ jobs:
           cd ffmpeg-src
           mkdir ../dist
           
-          # Pastikan flag di sini juga konsisten (tanpa SIMD)
+          # Linker command
+          # Perhatikan: Kita menghapus -lavfilter -lswscale dll karena library itu sudah didisable di atas.
+          
           emcc \
-            -O3 \
+            -Oz \
+            -flto \
             -s USE_PTHREADS=0 \
             -s INITIAL_MEMORY=33554432 \
             -s ALLOW_MEMORY_GROWTH=1 \
@@ -91,15 +110,16 @@ jobs:
             -s MODULARIZE=1 \
             -s EXPORT_NAME='createFFmpegCore' \
             -s WASM_BIGINT=1 \
+            --closure 1 \
             -o ../dist/ffmpeg-core.js \
             \
-            fftools/*.o \
+            fftools/ffmpeg_opt.o fftools/ffmpeg.o fftools/cmdutils.o \
             \
-            -Llibavcodec -Llibavdevice -Llibavfilter -Llibavformat -Llibavutil -Llibswresample -Llibswscale \
-            -lavdevice -lavfilter -lavformat -lavcodec -lswresample -lswscale -lavutil
+            -Llibavcodec -Llibavformat -Llibavutil \
+            -lavformat -lavcodec -lavutil
 
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: ffmpeg-core-lite
+          name: ffmpeg-core-ultra-lite
           path: dist/
